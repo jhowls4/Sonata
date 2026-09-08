@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,8 +21,9 @@ import com.example.sonata.data.DiscordAccount
 import com.example.sonata.ui.DiscordLoginWebView
 import com.example.sonata.ui.AccountManagerViewModel
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen() {
+fun MainScreen(onNavigateToCustomization: () -> Unit) {
     val viewModel: AccountManagerViewModel = viewModel()
     val accounts = viewModel.accounts
     
@@ -31,8 +33,28 @@ fun MainScreen() {
     var newName by remember { mutableStateOf("") }
 
     Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Discord Accounts") },
+                actions = {
+                    // Option A: Top App Bar Action Button
+                    IconButton(onClick = onNavigateToCustomization) {
+                        Icon(Icons.Default.Settings, contentDescription = "RPC Customization")
+                    }
+                }
+            )
+        },
         floatingActionButton = {
             Column(horizontalAlignment = Alignment.End) {
+                // Option B: Extra Floating Action Button
+                SmallFloatingActionButton(
+                    onClick = onNavigateToCustomization,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                ) {
+                    Icon(Icons.Default.Settings, contentDescription = "Customize RPC")
+                }
+
                 FloatingActionButton(
                     onClick = { showWebView = true },
                     modifier = Modifier.padding(bottom = 8.dp)
@@ -46,8 +68,8 @@ fun MainScreen() {
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).padding(16.dp)) {
-            Text("Discord Accounts", style = MaterialTheme.typography.headlineMedium)
-            Spacer(modifier = Modifier.height(16.dp))
+            // Text("Discord Accounts", style = MaterialTheme.typography.headlineMedium) // Removed as it's now in TopAppBar
+            // Spacer(modifier = Modifier.height(16.dp))
             
             LazyColumn {
                 items(accounts) { account ->

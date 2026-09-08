@@ -1,15 +1,13 @@
 package com.example.sonata.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,6 +27,7 @@ fun RpcCustomizationScreen(
     onBack: () -> Unit
 ) {
     val config by viewModel.config.collectAsState()
+    val presets by viewModel.presets.collectAsState()
 
     Scaffold(
         topBar = {
@@ -54,11 +53,19 @@ fun RpcCustomizationScreen(
             }
 
             item {
-                ConfigSection(title = "Activity Info", icon = Icons.Default.Info) {
+                ConfigSection(title = "General & App ID", icon = Icons.Default.Info) {
                     OutlinedTextField(
                         value = config.applicationId,
                         onValueChange = { viewModel.updateConfig(config.copy(applicationId = it)) },
-                        label = { Text("Application ID") },
+                        label = { Text("Discord Application ID") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = config.customActivityName ?: "",
+                        onValueChange = { viewModel.updateConfig(config.copy(customActivityName = it.ifBlank { null })) },
+                        label = { Text("Custom Activity Name") },
+                        placeholder = { Text("Default: App Name (e.g. Spotify)") },
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -69,74 +76,82 @@ fun RpcCustomizationScreen(
             }
 
             item {
-                ConfigSection(title = "Templates", icon = Icons.Default.Edit) {
-                    TemplateField("Details", config.detailsTemplate) { viewModel.updateConfig(config.copy(detailsTemplate = it)) }
-                    TemplateField("State", config.stateTemplate) { viewModel.updateConfig(config.copy(stateTemplate = it)) }
-                    TemplateField("Large Image Hover", config.largeImageHoverTemplate) { viewModel.updateConfig(config.copy(largeImageHoverTemplate = it)) }
-                    TemplateField("Small Image Hover", config.smallImageHoverTemplate) { viewModel.updateConfig(config.copy(smallImageHoverTemplate = it)) }
+                ConfigSection(title = "Text Templates", icon = Icons.Default.Edit) {
+                    TemplateField("Details Line", config.detailsTemplate) { viewModel.updateConfig(config.copy(detailsTemplate = it)) }
+                    TemplateField("State Line", config.stateTemplate) { viewModel.updateConfig(config.copy(stateTemplate = it)) }
+                    TemplateField("Large Image Hover Text", config.largeImageHoverTemplate) { viewModel.updateConfig(config.copy(largeImageHoverTemplate = it)) }
+                    TemplateField("Small Image Hover Text", config.smallImageHoverTemplate) { viewModel.updateConfig(config.copy(smallImageHoverTemplate = it)) }
                 }
             }
 
             item {
-                ConfigSection(title = "Timestamps", icon = Icons.Default.DateRange) {
+                ConfigSection(title = "Timestamps & Artwork", icon = Icons.Default.DateRange) {
+                    Text("Timestamp Mode", style = MaterialTheme.typography.labelLarge)
                     TimestampModeSelector(config.timestampMode) {
                         viewModel.updateConfig(config.copy(timestampMode = it))
                     }
-                }
-            }
-
-            item {
-                ConfigSection(title = "Assets & Art", icon = Icons.Default.ThumbUp) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Cover Art Source", style = MaterialTheme.typography.labelLarge)
                     CoverArtSourceSelector(config.coverArtSource) {
                         viewModel.updateConfig(config.copy(coverArtSource = it))
                     }
-                    if (config.coverArtSource == CoverArtSource.CUSTOM) {
+                    AnimatedVisibility(visible = config.coverArtSource == CoverArtSource.CUSTOM) {
                         OutlinedTextField(
                             value = config.customImageUrl ?: "",
                             onValueChange = { viewModel.updateConfig(config.copy(customImageUrl = it)) },
                             label = { Text("Custom Image URL") },
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                         )
                     }
                     OutlinedTextField(
                         value = config.fallbackAssetKey,
                         onValueChange = { viewModel.updateConfig(config.copy(fallbackAssetKey = it)) },
-                        label = { Text("Fallback/Small Asset Key") },
-                        modifier = Modifier.fillMaxWidth()
+                        label = { Text("Fallback Asset Key") },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
                         Checkbox(checked = config.showSmallBadge, onCheckedChange = { viewModel.updateConfig(config.copy(showSmallBadge = it)) })
-                        Text("Show Small Badge")
+                        Text("Show Media Player Badge")
                     }
                 }
             }
 
             item {
-                ConfigSection(title = "Buttons", icon = Icons.Default.List) {
-                    config.buttons.forEachIndexed { index, button ->
-                        ButtonEditRow(button, 
-                            onUpdate = { updated ->
-                                val newList = config.buttons.toMutableList()
-                                newList[index] = updated
-                                viewModel.updateConfig(config.copy(buttons = newList))
-                            },
-                            onDelete = {
-                                val newList = config.buttons.toMutableList()
-                                newList.removeAt(index)
-                                viewModel.updateConfig(config.copy(buttons = newList))
-                            }
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
+                ConfigSection(title = "Interactive Buttons", icon = Icons.Default.List) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Enable Buttons", modifier = Modifier.weight(1f))
+                        Switch(checked = config.buttonsEnabled, onCheckedChange = { viewModel.updateConfig(config.copy(buttonsEnabled = it)) })
                     }
-                    if (config.buttons.size < 2) {
-                        Button(onClick = {
-                            viewModel.updateConfig(config.copy(buttons = config.buttons + RpcButtonConfig("Label", "https://")))
-                        }) {
-                            Icon(Icons.Default.Add, contentDescription = null)
-                            Text("Add Button")
+                    if (config.buttonsEnabled) {
+                        config.buttons.forEachIndexed { index, button ->
+                            ButtonEditRow(button, 
+                                onUpdate = { updated ->
+                                    val newList = config.buttons.toMutableList()
+                                    newList[index] = updated
+                                    viewModel.updateConfig(config.copy(buttons = newList))
+                                },
+                                onDelete = {
+                                    val newList = config.buttons.toMutableList()
+                                    newList.removeAt(index)
+                                    viewModel.updateConfig(config.copy(buttons = newList))
+                                }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                        if (config.buttons.size < 2) {
+                            Button(onClick = {
+                                viewModel.updateConfig(config.copy(buttons = config.buttons + RpcButtonConfig("Label", "https://")))
+                            }) {
+                                Icon(Icons.Default.Add, contentDescription = null)
+                                Text("Add Button")
+                            }
                         }
                     }
                 }
+            }
+
+            item {
+                PresetManagerSection(presets, onSave = { viewModel.savePreset(it) }, onDelete = { viewModel.deletePreset(it) }, onApply = { viewModel.applyPreset(it) })
             }
         }
     }
@@ -146,52 +161,80 @@ fun RpcCustomizationScreen(
 fun RpcPreviewCard(config: RpcCustomizationConfig) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2D31)), // Discord dark
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2D31)),
         shape = RoundedCornerShape(8.dp)
     ) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(64.dp)) {
-                AsyncImage(
-                    model = "https://via.placeholder.com/128", // Placeholder for art
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)),
-                    contentScale = ContentScale.Crop
-                )
-                if (config.showSmallBadge) {
-                    Box(modifier = Modifier.size(24.dp).align(Alignment.BottomEnd).clip(RoundedCornerShape(12.dp)).padding(2.dp)) {
-                        AsyncImage(
-                            model = "https://via.placeholder.com/48", // Placeholder for small badge
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp))
-                        )
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("LIVE PREVIEW", style = MaterialTheme.typography.labelSmall, color = Color(0xFFB5BAC1))
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.size(64.dp)) {
+                    AsyncImage(
+                        model = "https://via.placeholder.com/128",
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                    if (config.showSmallBadge) {
+                        Box(modifier = Modifier.size(24.dp).align(Alignment.BottomEnd).clip(RoundedCornerShape(12.dp)).padding(2.dp)) {
+                            AsyncImage(
+                                model = "https://via.placeholder.com/48",
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp))
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text(text = "Sonata", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text(
+                        text = StringTemplateParser.parse(config.detailsTemplate, "Sample Title", "Sample Artist"),
+                        color = Color.White, fontSize = 12.sp
+                    )
+                    Text(
+                        text = StringTemplateParser.parse(config.stateTemplate, "Sample Title", "Sample Artist"),
+                        color = Color(0xFFB5BAC1), fontSize = 12.sp
+                    )
+                    if (config.timestampMode != TimestampMode.OFF) {
+                        Text(text = "01:23 elapsed", color = Color(0xFFB5BAC1), fontSize = 11.sp)
                     }
                 }
             }
-            Spacer(modifier = Modifier.width(16.dp))
-            Column {
-                Text(
-                    text = "Sonata",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
-                Text(
-                    text = StringTemplateParser.parse(config.detailsTemplate, "Sample Title", "Sample Artist"),
-                    color = Color.White,
-                    fontSize = 12.sp
-                )
-                Text(
-                    text = StringTemplateParser.parse(config.stateTemplate, "Sample Title", "Sample Artist"),
-                    color = Color(0xFFB5BAC1),
-                    fontSize = 12.sp
-                )
-                if (config.timestampMode != TimestampMode.OFF) {
-                    Text(
-                        text = "01:23 elapsed",
-                        color = Color(0xFFB5BAC1),
-                        fontSize = 11.sp
-                    )
+            if (config.buttonsEnabled && config.buttons.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                config.buttons.forEach { btn ->
+                    OutlinedButton(
+                        onClick = {},
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(text = StringTemplateParser.parse(btn.label, "Sample Title"), fontSize = 12.sp)
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun PresetManagerSection(presets: List<RpcPreset>, onSave: (String) -> Unit, onDelete: (String) -> Unit, onApply: (RpcPreset) -> Unit) {
+    var newPresetName by remember { mutableStateOf("") }
+    ConfigSection(title = "Preset Manager", icon = Icons.Default.Star) {
+        presets.forEach { preset ->
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text(preset.name, modifier = Modifier.weight(1f))
+                TextButton(onClick = { onApply(preset) }) { Text("Apply") }
+                IconButton(onClick = { onDelete(preset.name) }) { Icon(Icons.Default.Delete, contentDescription = null) }
+            }
+        }
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(value = newPresetName, onValueChange = { newPresetName = it }, label = { Text("New Preset Name") }, modifier = Modifier.weight(1f))
+            IconButton(onClick = { if (newPresetName.isNotBlank()) { onSave(newPresetName); newPresetName = "" } }) {
+                Icon(Icons.Default.Check, contentDescription = "Save")
             }
         }
     }
@@ -233,21 +276,20 @@ fun TemplateField(label: String, value: String, onValueChange: (String) -> Unit)
         onValueChange = onValueChange,
         label = { Text(label) },
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        supportingText = { Text("Available: {title}, {artist}, {album}, {app}, {duration}, {progress}") }
+        supportingText = { Text("Placeholders: {title}, {artist}, {album}, {app}, {duration}, {progress}") }
     )
 }
 
 @Composable
-fun ActivityTypeDropdown(current: Int, onSelect: (Int) -> Unit) {
-    val types = listOf(0 to "Playing", 2 to "Listening", 3 to "Watching", 5 to "Competing")
+fun ActivityTypeDropdown(current: DiscordActivityType, onSelect: (DiscordActivityType) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
-            Text("Activity Type: ${types.find { it.first == current }?.second ?: "Unknown"}")
+            Text("Activity Type: ${current.name}")
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            types.forEach { (value, label) ->
-                DropdownMenuItem(text = { Text(label) }, onClick = { onSelect(value); expanded = false })
+            DiscordActivityType.entries.forEach { type ->
+                DropdownMenuItem(text = { Text(type.name) }, onClick = { onSelect(type); expanded = false })
             }
         }
     }

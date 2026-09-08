@@ -18,21 +18,15 @@ class DataStoreRepository(private val context: Context) {
 
     companion object {
         private val GLOBAL_CONFIG_KEY = stringPreferencesKey("global_rpc_config")
+        private val PRESETS_KEY = stringPreferencesKey("rpc_presets")
         private fun accountConfigKey(token: String) = stringPreferencesKey("rpc_config_$token")
     }
 
     fun getGlobalConfig(): Flow<RpcCustomizationConfig> {
         return context.dataStore.data.map { preferences ->
-            val jsonString = preferences[GLOBAL_CONFIG_KEY]
-            if (jsonString != null) {
-                try {
-                    json.decodeFromString(jsonString)
-                } catch (e: Exception) {
-                    RpcCustomizationConfig()
-                }
-            } else {
-                RpcCustomizationConfig()
-            }
+            preferences[GLOBAL_CONFIG_KEY]?.let {
+                try { json.decodeFromString<RpcCustomizationConfig>(it) } catch (e: Exception) { null }
+            } ?: RpcCustomizationConfig()
         }
     }
 
@@ -44,13 +38,8 @@ class DataStoreRepository(private val context: Context) {
 
     fun getAccountConfig(token: String): Flow<RpcCustomizationConfig?> {
         return context.dataStore.data.map { preferences ->
-            val jsonString = preferences[accountConfigKey(token)]
-            jsonString?.let {
-                try {
-                    json.decodeFromString<RpcCustomizationConfig>(it)
-                } catch (e: Exception) {
-                    null
-                }
+            preferences[accountConfigKey(token)]?.let {
+                try { json.decodeFromString<RpcCustomizationConfig>(it) } catch (e: Exception) { null }
             }
         }
     }
@@ -63,6 +52,20 @@ class DataStoreRepository(private val context: Context) {
             } else {
                 preferences.remove(key)
             }
+        }
+    }
+
+    fun getPresets(): Flow<List<RpcPreset>> {
+        return context.dataStore.data.map { preferences ->
+            preferences[PRESETS_KEY]?.let {
+                try { json.decodeFromString<List<RpcPreset>>(it) } catch (e: Exception) { emptyList() }
+            } ?: emptyList()
+        }
+    }
+
+    suspend fun savePresets(presets: List<RpcPreset>) {
+        context.dataStore.edit { preferences ->
+            preferences[PRESETS_KEY] = json.encodeToString(presets)
         }
     }
 }

@@ -18,6 +18,8 @@ class RpcForegroundService : Service() {
     private val CHANNEL_ID = "SonataRpcChannel"
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private lateinit var repository: DataStoreRepository
+    private var updateJob: Job? = null
+    private var lastTrackKey: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -52,13 +54,13 @@ class RpcForegroundService : Service() {
             }
         }
 
-        val title = intent?.getStringExtra("title")
-        val artist = intent?.getStringExtra("artist")
-        val album = intent?.getStringExtra("album")
-        val artUri = intent?.getStringExtra("artUri")
         val isPlaying = intent?.getBooleanExtra("isPlaying", false) ?: false
-        val duration = intent?.getLongExtra("duration", 0L) ?: 0L
-        val progress = intent?.getLongExtra("progress", 0L) ?: 0L
+        val title = if (isPlaying) intent?.getStringExtra("title") else null
+        val artist = if (isPlaying) intent?.getStringExtra("artist") else null
+        val album = if (isPlaying) intent?.getStringExtra("album") else null
+        val duration = if (isPlaying) intent?.getLongExtra("duration", 0L) ?: 0L else 0L
+        val progress = if (isPlaying) intent?.getLongExtra("progress", 0L) ?: 0L else 0L
+        val appName = intent?.getStringExtra("appName") ?: "Sonata"
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Sonata Rich Presence")
@@ -74,20 +76,31 @@ class RpcForegroundService : Service() {
             startForeground(1, notification)
         }
 
-        serviceScope.launch {
+        val currentTrackKey = if (isPlaying) "${artist}_${title}" else null
+        
+        updateJob?.cancel()
+        updateJob = serviceScope.launch {
+            if (isPlaying) {
+                // Debounce metadata changes by 500ms to handle fast skipping
+                if (currentTrackKey != lastTrackKey) {
+                    delay(500)
+                }
+            }
+            
+            lastTrackKey = currentTrackKey
             val globalConfig = repository.getGlobalConfig().first()
-            rpcManagers.forEach { manager ->
+            val managers = rpcManagers.toList()
+            managers.forEach { manager ->
                 val accountConfig = repository.getAccountConfig(manager.getToken()).first() ?: globalConfig
                 manager.updateStatus(
                     config = accountConfig,
                     title = title,
                     artist = artist,
                     album = album,
-                    artUri = artUri,
                     isPlaying = isPlaying,
                     durationMillis = if (duration > 0) duration else null,
                     progressMillis = progress,
-                    appName = "Sonata"
+                    appName = appName
                 )
             }
         }

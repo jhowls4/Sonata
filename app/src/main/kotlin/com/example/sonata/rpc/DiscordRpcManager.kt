@@ -7,6 +7,7 @@ import kotlinx.serialization.json.*
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.*
 import com.example.sonata.data.*
+import com.example.sonata.util.ArtworkFetcher
 import com.example.sonata.util.StringTemplateParser
 import java.util.Locale
 
@@ -19,6 +20,8 @@ class DiscordRpcManager(private val token: String) {
     private var isConnected = false
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var heartbeatJob: Job? = null
+
+    private var trackStartTime: Long = 0
 
     fun getToken(): String = token
 
@@ -90,12 +93,11 @@ class DiscordRpcManager(private val token: String) {
         }
     }
 
-    fun updateStatus(
+    suspend fun updateStatus(
         config: RpcCustomizationConfig,
         title: String?,
         artist: String?,
         album: String?,
-        artUri: String?,
         isPlaying: Boolean,
         durationMillis: Long? = null,
         progressMillis: Long? = null,
@@ -103,13 +105,26 @@ class DiscordRpcManager(private val token: String) {
     ) {
         if (!isConnected) return
 
+        if (isPlaying) {
+            trackStartTime = System.currentTimeMillis()
+        }
+
         val activity = if (isPlaying && title != null) {
             val durationStr = durationMillis?.let { formatTime(it) }
             val progressStr = progressMillis?.let { formatTime(it) }
 
+            // Handle Artwork Search (ArtworkFetcher already returns mp:external/ format)
+            val largeImageUrl = if (config.coverArtSource == CoverArtSource.DYNAMIC) {
+                ArtworkFetcher.getArtworkUrl(artist, title)
+            } else if (config.coverArtSource == CoverArtSource.CUSTOM) {
+                config.customImageUrl
+            } else {
+                null
+            } ?: config.fallbackAssetKey.ifBlank { "default_cover" }
+
             buildJsonObject {
-                put("name", "Sonata")
-                put("type", config.activityType)
+                put("name", config.customActivityName ?: appName ?: "Sonata")
+                put("type", config.activityType.value)
                 put("application_id", config.applicationId)
                 put("details", StringTemplateParser.parse(config.detailsTemplate, title, artist, album, appName, durationStr, progressStr))
                 put("state", StringTemplateParser.parse(config.stateTemplate, title, artist, album, appName, durationStr, progressStr))
@@ -119,10 +134,12 @@ class DiscordRpcManager(private val token: String) {
                         val now = System.currentTimeMillis()
                         when (config.timestampMode) {
                             TimestampMode.ELAPSED -> {
-                                progressMillis?.let { put("start", now - it) }
+                                val start = progressMillis?.let { now - it } ?: trackStartTime
+                                put("start", start)
                             }
                             TimestampMode.REMAINING -> {
                                 if (durationMillis != null && progressMillis != null) {
+                                    put("start", now)
                                     put("end", now + (durationMillis - progressMillis))
                                 }
                             }
@@ -132,39 +149,29 @@ class DiscordRpcManager(private val token: String) {
                 }
 
                 put("assets", buildJsonObject {
-                    val largeImage = when (config.coverArtSource) {
-                        CoverArtSource.DYNAMIC -> artUri ?: config.fallbackAssetKey
-                        CoverArtSource.CUSTOM -> config.customImageUrl ?: config.fallbackAssetKey
-                        CoverArtSource.ASSET_KEY -> config.fallbackAssetKey
-                    }
-                    put("large_image", largeImage)
-                    put("large_text", StringTemplateParser.parse(config.largeImageHoverTemplate, title, artist, album, appName, durationStr, progressStr))
+                    put("large_image", largeImageUrl)
+                    put("large_text", album ?: title ?: "Sonata")
                     
                     if (config.showSmallBadge) {
-                        put("small_image", config.fallbackAssetKey)
-                        put("small_text", StringTemplateParser.parse(config.smallImageHoverTemplate, title, artist, album, appName, durationStr, progressStr))
+                        put("small_image", config.fallbackAssetKey.ifBlank { "default_cover" })
+                        put("small_text", appName ?: StringTemplateParser.parse(config.smallImageHoverTemplate, title, artist, album, appName, durationStr, progressStr))
                     }
                 })
 
-                if (config.buttons.isNotEmpty()) {
+                if (config.buttonsEnabled && config.buttons.isNotEmpty()) {
                     put("buttons", buildJsonArray {
-                        config.buttons.take(2).forEach { btn ->
-                            add(btn.label)
+                        config.buttons.filter { it.isEnabled }.take(2).forEach { btn ->
+                            add(StringTemplateParser.parse(btn.label, title, artist, album, appName, durationStr, progressStr))
                         }
                     })
-                    // Note: Gateway presence update buttons are often just labels or handled differently.
-                    // But standard Rich Presence activities in Gateway v10 can take metadata for buttons.
-                    // Actually, for Gateway presence update, 'buttons' is an array of strings (labels) 
-                    // and you can't really provide URLs easily there unless using the 'metadata' or 'secrets'.
-                    // However, we will store them as strings for now or try the object format.
                 }
 
                 put("metadata", buildJsonObject {
                     put("album_name", album ?: "")
                     put("artist_name", artist ?: "")
-                    if (config.buttons.isNotEmpty()) {
+                    if (config.buttonsEnabled && config.buttons.isNotEmpty()) {
                         put("button_urls", buildJsonArray {
-                            config.buttons.take(2).forEach { btn ->
+                            config.buttons.filter { it.isEnabled }.take(2).forEach { btn ->
                                 add(StringTemplateParser.parse(btn.urlTemplate, title, artist, album, appName, durationStr, progressStr))
                             }
                         })

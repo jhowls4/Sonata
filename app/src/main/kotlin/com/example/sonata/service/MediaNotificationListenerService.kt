@@ -9,25 +9,29 @@ import android.media.session.MediaSession
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.service.notification.NotificationListenerService
-import android.util.Log
+import kotlinx.coroutines.*
 
 class MediaNotificationListenerService : NotificationListenerService() {
 
     private lateinit var mediaSessionManager: MediaSessionManager
     private val controllers = mutableMapOf<MediaSession.Token, MediaController>()
     
+    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var debounceJob: Job? = null
+    private var lastTitle: String? = null
+    
     private val sessionsChangedListener = MediaSessionManager.OnActiveSessionsChangedListener { 
         registerControllers()
-        updateRpc()
+        updateRpc(force = true)
     }
 
     private val controllerCallback = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) {
-            updateRpc()
+            updateRpc(force = true)
         }
 
         override fun onPlaybackStateChanged(state: PlaybackState?) {
-            updateRpc()
+            updateRpc(force = false)
         }
     }
 
@@ -43,18 +47,19 @@ class MediaNotificationListenerService : NotificationListenerService() {
     override fun onDestroy() {
         mediaSessionManager.removeOnActiveSessionsChangedListener(sessionsChangedListener)
         unregisterControllers()
+        serviceScope.cancel()
         super.onDestroy()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        updateRpc()
+        updateRpc(force = true)
         return START_STICKY
     }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
         registerControllers()
-        updateRpc()
+        updateRpc(force = true)
     }
 
     override fun onListenerDisconnected() {
@@ -79,7 +84,7 @@ class MediaNotificationListenerService : NotificationListenerService() {
         controllers.clear()
     }
 
-    private fun updateRpc() {
+    private fun updateRpc(force: Boolean = false) {
         // Re-register to catch new sessions
         registerControllers()
 
@@ -87,23 +92,68 @@ class MediaNotificationListenerService : NotificationListenerService() {
             it.playbackState?.state == PlaybackState.STATE_PLAYING 
         }
 
+        val currentTitle = activeController?.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
+        val isPlaying = activeController != null
+        
+        if (!isPlaying) {
+            lastTitle = null
+        } else {
+            lastTitle = currentTitle
+        }
+
+        // Always perform update immediately; the RpcForegroundService will handle debouncing
+        performUpdate(activeController)
+    }
+
+    private fun performUpdate(activeController: MediaController?) {
         val intent = Intent(this, RpcForegroundService::class.java).apply {
             if (activeController != null) {
                 val metadata = activeController.metadata
                 val playbackState = activeController.playbackState
+                
+                val appName = getFriendlyAppName(activeController.packageName, metadata)
+
                 putExtra("title", metadata?.getString(MediaMetadata.METADATA_KEY_TITLE))
                 putExtra("artist", metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST))
                 putExtra("album", metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM))
-                val artUri = metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI) ?:
-                             metadata?.getString(MediaMetadata.METADATA_KEY_ART_URI)
-                putExtra("artUri", artUri)
-                putExtra("duration", metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION))
-                putExtra("progress", playbackState?.position)
-                putExtra("isPlaying", true)
+                
+                putExtra("duration", metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L)
+                putExtra("progress", playbackState?.position ?: 0L)
+                putExtra("isPlaying", playbackState?.state == PlaybackState.STATE_PLAYING)
+                putExtra("packageName", activeController.packageName)
+                putExtra("appName", appName)
             } else {
                 putExtra("isPlaying", false)
             }
         }
         startForegroundService(intent)
+    }
+
+    private fun getFriendlyAppName(packageName: String, metadata: MediaMetadata?): String {
+        val friendlyMap = mapOf(
+            "com.spotify.music" to "Spotify",
+            "com.google.android.apps.youtube.music" to "YouTube Music",
+            "com.apple.android.music" to "Apple Music",
+            "com.amazon.mp3" to "Amazon Music",
+            "com.soundcloud.android" to "SoundCloud",
+            "deezer.android.app" to "Deezer",
+            "com.tidal.music" to "TIDAL",
+            "org.videolan.vlc" to "VLC"
+        )
+
+        friendlyMap[packageName]?.let { return it }
+
+        metadata?.let {
+            it.getString(MediaMetadata.METADATA_KEY_WRITER)?.let { writer -> if (writer.isNotBlank()) return writer }
+            it.getString(MediaMetadata.METADATA_KEY_COMPOSER)?.let { composer -> if (composer.isNotBlank()) return composer }
+        }
+
+        val pm = packageManager
+        return try {
+            val ai = pm.getApplicationInfo(packageName, 0)
+            pm.getApplicationLabel(ai).toString()
+        } catch (e: Exception) {
+            "Unknown Player"
+        }
     }
 }
